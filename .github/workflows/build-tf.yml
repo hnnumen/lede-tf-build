@@ -66,6 +66,35 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
+      - name: Set default LAN IP 192.168.2.1
+        working-directory: openwrt
+        env:
+          LAN_IP: "192.168.2.1"
+        run: |
+          set -euo pipefail
+          CG=package/base-files/files/bin/config_generate
+          echo "--- 改动前 ---"
+          grep -n '192\.168\.1\.1' "$CG" || true
+          sed -i "s|ipad=\${ipaddr:-\"192\.168\.1\.1\"}|ipad=\${ipaddr:-\"${LAN_IP}\"}|" "$CG"
+          echo "--- 改动后 ---"
+          grep -n '192\.168\.' "$CG" | head -5
+          grep -q "ipad=\${ipaddr:-\"${LAN_IP}\"}" "$CG" \
+            || { echo "::error::config_generate 补丁未生效"; exit 1; }
+
+          mkdir -p files/etc/uci-defaults files/etc/config
+          printf '%s\n' \
+            '#!/bin/sh' \
+            "# 兜底：首次启动 / 恢复出厂后统一 LAN IP 为 ${LAN_IP}" \
+            "[ -f /etc/config/network ] || exit 0" \
+            "uci -q set network.lan.ipaddr='${LAN_IP}'" \
+            "uci -q set network.lan.netmask='255.255.255.0'" \
+            'uci -q commit network' \
+            '/etc/init.d/network reload >/dev/null 2>&1' \
+            'exit 0' > files/etc/uci-defaults/99-custom-lan-ip
+          chmod +x files/etc/uci-defaults/99-custom-lan-ip
+          echo "--- uci-defaults ---"
+          cat files/etc/uci-defaults/99-custom-lan-ip
+
       - name: Cache downloads
         uses: actions/cache@v4
         with:
